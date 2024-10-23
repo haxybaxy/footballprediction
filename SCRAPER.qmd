@@ -1,0 +1,313 @@
+---
+title: "scraper"
+format: html
+editor: visual
+---
+
+# **Installation**
+
+```{r}
+install.packages("devtools")
+devtools::install_github("JaseZiv/worldfootballR")
+```
+
+```{r}
+library(worldfootballR)
+```
+
+```{r}
+install.packages("dplyr")
+library(dplyr)
+```
+
+# Join FBref and Transfermarkt data
+
+```{r}
+mapped_players <- player_dictionary_mapping()
+dplyr::glimpse(mapped_players)
+```
+
+# SEASON STATS DATA
+
+```{r}
+# Initialize an empty list to store team stats
+laliga_team_stats_list <- list()
+
+# Loop through the seasons 2010-2023 for team stats
+for (year in 2010:2023) {
+  stats <- fb_season_team_stats(
+    country = "ESP", 
+    gender = "M", 
+    season_end_year = year, 
+    tier = "1st", 
+    stat_type = "standard"
+  )
+  
+  # Add a year column to keep track of the season
+  stats$Season_End_Year <- year
+  
+  laliga_team_stats_list[[as.character(year)]] <- stats
+}
+
+# Get all column names across all seasons
+all_team_columns <- unique(unlist(lapply(laliga_team_stats_list, colnames)))
+
+# Ensure all data frames have the same columns by filling missing ones with NA
+laliga_team_stats_list <- lapply(laliga_team_stats_list, function(df) {
+  missing_cols <- setdiff(all_team_columns, colnames(df))
+  df[missing_cols] <- NA
+  df[, all_team_columns]  # Reorder columns to match the full set
+})
+
+# Combine all seasons into one data frame
+laliga_team_stats <- do.call(rbind, laliga_team_stats_list)
+dplyr::glimpse(laliga_team_stats)
+
+```
+
+```{r}
+# Filter the dataset for Real Madrid and Barcelona
+laliga_team_stats_filtered <- laliga_team_stats %>%
+  filter(Squad %in% c("Real Madrid", "Barcelona"))
+
+# Check the structure of the filtered dataset
+dplyr::glimpse(laliga_team_stats_filtered)
+
+# Save the filtered dataset for further use
+write.csv(laliga_team_stats_filtered, "real_madrid_barcelona_stats.csv", row.names = FALSE)
+
+```
+
+```{r}
+real_madrid_barcelona_stats <- read.csv("~/Desktop/real_madrid_barcelona_stats.csv")
+View(real_madrid_barcelona_stats)
+```
+
+# MATCHES STATS
+
+## LALIGA RESULTS FOR PAST 5 SEASONS
+
+```{r}
+# Get match results for a specific season (for example, 2023)
+test_match_results <- fb_match_results(country = "ESP", gender = "M", season_end_year = 2023, tier = "1st")
+
+# Check the column names of the match results data frame
+colnames(test_match_results)
+
+```
+
+```{r}
+# Create a list to store match data for each season
+match_results_list <- list()
+
+# Define seasons (last 5 seasons)
+seasons <- 2019:2023
+
+# Loop through the seasons and get match results for La Liga (Spain)
+for (year in seasons) {
+  match_results <- fb_match_results(country = "ESP", gender = "M", season_end_year = year, tier = "1st")
+  
+  # Filter only for Real Madrid and Barcelona matches
+  filtered_matches <- test_match_results %>% 
+  filter(Home %in% c("Real Madrid", "Barcelona") | 
+         Away %in% c("Real Madrid", "Barcelona"))
+  
+  # Add a season column to track the year
+  filtered_matches$Season_End_Year <- year
+  
+  # Add to the list
+  match_results_list[[as.character(year)]] <- filtered_matches
+}
+
+# Combine all match results into one data frame
+all_match_results <- bind_rows(match_results_list)
+```
+
+```{r}
+# Assuming you have already gathered the match results for Real Madrid and Barcelona in `all_match_results`
+
+# Filter the results for Real Madrid and Barcelona if not already filtered
+laliga_team_results <- all_match_results %>%
+  filter(Home %in% c("Real Madrid", "Barcelona") | Away %in% c("Real Madrid", "Barcelona"))
+
+# View the structure of the dataset
+dplyr::glimpse(laliga_team_results)
+
+# View the first few rows of the dataset
+head(laliga_team_results)
+
+# Optionally save the dataset to a CSV file for future use
+write.csv(laliga_team_results, "real_madrid_barcelona_match_results.csv", row.names = FALSE)
+
+```
+
+```{r}
+real_madrid_barcelona_match_results <- read.csv("~/Desktop/real_madrid_barcelona_match_results.csv")
+View(real_madrid_barcelona_match_results)
+```
+
+## FAILED OPTION
+
+### Get match summaries for Real Madrid and Barcelona
+
+```{r}
+# Create a list to store match summary data
+match_summary_list <- list()
+
+# Loop through the match URLs to get match summaries
+for (url in all_match_results$MatchURL) {
+  tryCatch({
+    match_summary <- fb_match_summary(match_url = url)
+    
+    # Check if match_summary is not empty
+    if (nrow(match_summary) > 0) {
+      # Add a column for the match URL to join with match results later
+      match_summary$MatchURL <- url
+      
+      # Add to the list
+      match_summary_list[[url]] <- match_summary
+    }
+  }, error = function(e) {
+    message(paste("Error with URL:", url))
+  })
+}
+
+# Combine all match summaries into one data frame
+all_match_summaries <- bind_rows(match_summary_list)
+
+# Check if data is collected
+dplyr::glimpse(all_match_summaries)
+
+
+```
+
+### Combine match results with match summaries
+
+```{r}
+# Test with a single URL
+test_url <- "https://fbref.com/en/matches/cbe0a303/Barcelona-Rayo-Vallecano-August-13-2022-La-Liga"
+test_summary <- fb_match_summary(match_url = test_url)
+
+# Check the structure of the returned data
+dplyr::glimpse(test_summary)
+
+```
+
+TOO MANY REQUESTS
+
+# PLAYER STATS
+
+## Last Season
+
+```{r}
+# Define the URLs for FC Barcelona and Real Madrid
+fc_barcelona_url <- "https://fbref.com/en/squads/206d90db/Barcelona-Stats"
+real_madrid_url <- "https://fbref.com/en/squads/53a2f082/Real-Madrid-Stats"
+
+# Introduce a delay between requests to avoid rate-limiting
+Sys.sleep(5)  # Wait 5 seconds before requesting FC Barcelona stats
+
+# Get standard stats for FC Barcelona
+barcelona_standard_stats <- fb_team_player_stats(team_urls = fc_barcelona_url, stat_type = 'standard')
+
+Sys.sleep(5)  # Wait 5 seconds before requesting Real Madrid stats
+
+# Get standard stats for Real Madrid
+real_madrid_standard_stats <- fb_team_player_stats(team_urls = real_madrid_url, stat_type = 'standard')
+
+# Combine the data for both teams
+combined_standard_stats <- bind_rows(barcelona_standard_stats, real_madrid_standard_stats)
+
+# View the structure of the combined dataset
+dplyr::glimpse(combined_standard_stats)
+
+# Optionally save the combined dataset to a CSV file
+write.csv(combined_standard_stats, "barcelona_real_madrid_standard_stats.csv", row.names = FALSE)
+
+```
+
+## Past Three Seasons
+
+```{r}
+# Define the URLs for FC Barcelona and Real Madrid for the past three seasons (2021-2023)
+fc_barcelona_urls <- c(
+  "https://fbref.com/en/squads/206d90db/2021-2022/Barcelona-Stats",
+  "https://fbref.com/en/squads/206d90db/2022-2023/Barcelona-Stats",
+  "https://fbref.com/en/squads/206d90db/2023-2024/Barcelona-Stats"
+)
+
+real_madrid_urls <- c(
+  "https://fbref.com/en/squads/53a2f082/2021-2022/Real-Madrid-Stats",
+  "https://fbref.com/en/squads/53a2f082/2022-2023/Real-Madrid-Stats",
+  "https://fbref.com/en/squads/53a2f082/2023-2024/Real-Madrid-Stats"
+)
+
+# Function to get player stats for a team over multiple seasons
+get_player_stats_for_team <- function(team_urls, stat_type = 'standard') {
+  # Initialize an empty list to store player data for each season
+  player_data_list <- list()
+  
+  # Loop through each team URL
+  for (team_url in team_urls) {
+    # Get the player stats for the team and the specific season
+    player_data <- fb_team_player_stats(team_urls = team_url, stat_type = stat_type)
+    
+    # Add the data to the list
+    player_data_list[[team_url]] <- player_data
+    
+    # Introduce a delay to avoid rate limiting
+    Sys.sleep(5)
+  }
+  
+  # Combine the player data for all seasons
+  combined_player_data <- bind_rows(player_data_list)
+  
+  return(combined_player_data)
+}
+
+# Get player stats for FC Barcelona for the past three seasons
+barcelona_player_stats <- get_player_stats_for_team(fc_barcelona_urls)
+
+# Get player stats for Real Madrid for the past three seasons
+real_madrid_player_stats <- get_player_stats_for_team(real_madrid_urls)
+
+# Combine the data for both teams
+combined_player_stats <- bind_rows(barcelona_player_stats, real_madrid_player_stats)
+
+# View the structure of the combined dataset
+dplyr::glimpse(combined_player_stats)
+
+# Optionally save the combined dataset to a CSV file
+write.csv(combined_player_stats, "barcelona_real_madrid_past_three_seasons_stats.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+barcelona_real_madrid_past_three_seasons_stats <- read.csv("~/Desktop/barcelona_real_madrid_past_three_seasons_stats.csv")
+View(barcelona_real_madrid_past_three_seasons_stats)
+```
+
+### Check if they are current players
+
+```{r}
+# Identify the players for the 2023-2024 season (current players)
+current_players <- combined_player_stats %>%
+  filter(Season == "2023-2024") %>%
+  pull(Player)
+
+# Add a column that indicates if the player is still with the team in the 2023-2024 season
+combined_player_stats <- combined_player_stats %>%
+  mutate(Current_Player = ifelse(Player %in% current_players, "Yes", "No"))
+
+# View the structure of the updated dataset
+dplyr::glimpse(combined_player_stats)
+
+# Optionally save the updated dataset to a CSV file
+write.csv(combined_player_stats, "barcelona_real_madrid_current_players.csv", row.names = FALSE)
+```
+
+```{r}
+barcelona_real_madrid_current_players <- read.csv("~/Desktop/barcelona_real_madrid_current_players.csv")
+View(barcelona_real_madrid_current_players)
+```
